@@ -1,9 +1,9 @@
 <?php
 
-$server = "75.65.129.181,1433";
+$server = "**.**.***.***,1433";
 $database = "PersonalTrainerDB";
-$username = "htmluser";
-$password = "html123";
+$username = "*****";
+$password = "*****;
 
 try {
     $dsn = "odbc:Driver={ODBC Driver 18 for SQL Server};".
