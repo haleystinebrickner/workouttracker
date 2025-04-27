@@ -1,0 +1,211 @@
+-- Create Database
+CREATE DATABASE PersonalTrainerDB;
+GO
+USE PersonalTrainerDB;
+GO
+
+-- Tables
+CREATE TABLE Trainers (
+    TrainerID INT IDENTITY(1,1) PRIMARY KEY,
+    Name VARCHAR(100),
+    Email VARCHAR(100) UNIQUE,
+    Phone VARCHAR(15) UNIQUE,
+    Specialization VARCHAR(100),
+    Certification VARCHAR(255),
+    ExperienceYears INT
+);
+
+CREATE TABLE Clients (
+    ClientID INT IDENTITY(1,1) PRIMARY KEY,
+    TrainerID INT,
+    Name VARCHAR(100),
+    Email VARCHAR(100) UNIQUE,
+    Phone VARCHAR(15) UNIQUE,
+    DateOfBirth DATE,
+    Goal VARCHAR(255),
+    Weight_lbs DECIMAL(5,2),
+    Height_inches DECIMAL(5,2),
+    FOREIGN KEY (TrainerID) REFERENCES Trainers(TrainerID)
+);
+
+CREATE TABLE Workouts (
+    WorkoutID INT IDENTITY(1,1) PRIMARY KEY,
+    ClientID INT,
+    WorkoutDate DATE,
+    Exercise VARCHAR(100),
+    Reps INT,
+    Sets INT,
+    WeightLifted_lbs DECIMAL(5,2),
+    Notes VARCHAR(255),
+    FOREIGN KEY (ClientID) REFERENCES Clients(ClientID)
+);
+
+CREATE TABLE Nutrition (
+    NutritionID INT IDENTITY(1,1) PRIMARY KEY,
+    ClientID INT,
+    Date DATE,
+    MealTime VARCHAR(20),
+    Food VARCHAR(255),
+    Calories_kcal INT,
+    Protein_g INT,
+    Carbs_g INT,
+    Fats_g INT,
+    FOREIGN KEY (ClientID) REFERENCES Clients(ClientID)
+);
+
+CREATE TABLE Payments (
+    PaymentID INT IDENTITY(1,1) PRIMARY KEY,
+    ClientID INT,
+    TrainerID INT,
+    PaymentDate DATE,
+    Amount DECIMAL(10,2),
+    PaymentMethod VARCHAR(50),
+    FOREIGN KEY (ClientID) REFERENCES Clients(ClientID),
+    FOREIGN KEY (TrainerID) REFERENCES Trainers(TrainerID)
+);
+
+-- Summary Tables
+CREATE TABLE DailyCalorieTotal (
+    ClientID INT,
+    Date DATE,
+    TotalCalories_kcal INT,
+    PRIMARY KEY (ClientID, Date),
+    FOREIGN KEY (ClientID) REFERENCES Clients(ClientID)
+);
+
+CREATE TABLE ClientPaymentsTotal (
+    ClientID INT PRIMARY KEY,
+    TotalAmountPaid DECIMAL(10,2),
+    FOREIGN KEY (ClientID) REFERENCES Clients(ClientID)
+);
+
+CREATE TABLE ClientPaymentDue (
+    ClientID INT PRIMARY KEY,
+    NextPaymentDue DATE,
+    FOREIGN KEY (ClientID) REFERENCES Clients(ClientID)
+);
+
+-- Stored Procedures
+CREATE PROCEDURE AddClient
+    @TrainerID INT,
+    @Name VARCHAR(100),
+    @Email VARCHAR(100),
+    @Phone VARCHAR(15),
+    @DateOfBirth DATE,
+    @Goal VARCHAR(255),
+    @Weight_lbs DECIMAL(5,2),
+    @Height_inches DECIMAL(5,2)
+AS
+BEGIN
+    INSERT INTO Clients (TrainerID, Name, Email, Phone, DateOfBirth, Goal, Weight_lbs, Height_inches)
+    VALUES (@TrainerID, @Name, @Email, @Phone, @DateOfBirth, @Goal, @Weight_lbs, @Height_inches);
+END;
+GO
+
+CREATE PROCEDURE GetClientWorkouts
+    @ClientID INT
+AS
+BEGIN
+    SELECT * FROM Workouts WHERE ClientID = @ClientID;
+END;
+GO
+
+CREATE PROCEDURE GetClientNutrition
+    @ClientID INT,
+    @Date DATE
+AS
+BEGIN
+    SELECT * FROM Nutrition WHERE ClientID = @ClientID AND Date = @Date;
+END;
+GO
+
+CREATE PROCEDURE AddPayment
+    @ClientID INT,
+    @TrainerID INT,
+    @PaymentDate DATE,
+    @Amount DECIMAL(10,2),
+    @PaymentMethod VARCHAR(50)
+AS
+BEGIN
+    INSERT INTO Payments (ClientID, TrainerID, PaymentDate, Amount, PaymentMethod)
+    VALUES (@ClientID, @TrainerID, @PaymentDate, @Amount, @PaymentMethod);
+END;
+GO
+
+CREATE PROCEDURE UpdateClientWeight
+    @ClientID INT,
+    @NewWeight_lbs DECIMAL(5,2)
+AS
+BEGIN
+    UPDATE Clients
+    SET Weight_lbs = @NewWeight_lbs
+    WHERE ClientID = @ClientID;
+END;
+GO
+
+-- Triggers
+CREATE TRIGGER PreventClientDeletion
+ON Clients
+INSTEAD OF DELETE
+AS
+BEGIN
+    IF EXISTS (SELECT 1 FROM Payments WHERE ClientID IN (SELECT ClientID FROM deleted))
+    BEGIN
+        RAISERROR ('Cannot delete client with active payments', 16, 1);
+        ROLLBACK TRANSACTION;
+    END
+    ELSE
+    BEGIN
+        DELETE FROM Clients WHERE ClientID IN (SELECT ClientID FROM deleted);
+    END
+END;
+GO
+
+CREATE TRIGGER UpdateDailyCalorieTotal
+ON Nutrition
+AFTER INSERT, UPDATE, DELETE
+AS
+BEGIN
+    DELETE FROM DailyCalorieTotal
+    WHERE (ClientID, Date) IN (
+        SELECT DISTINCT ClientID, Date FROM inserted
+        UNION
+        SELECT DISTINCT ClientID, Date FROM deleted
+    );
+
+    INSERT INTO DailyCalorieTotal (ClientID, Date, TotalCalories_kcal)
+    SELECT ClientID, Date, SUM(Calories_kcal)
+    FROM Nutrition
+    GROUP BY ClientID, Date;
+END;
+GO
+
+CREATE TRIGGER UpdateClientTotalPayments
+ON Payments
+AFTER INSERT, UPDATE, DELETE
+AS
+BEGIN
+    DELETE FROM ClientPaymentsTotal
+    WHERE ClientID IN (
+        SELECT DISTINCT ClientID FROM inserted
+        UNION
+        SELECT DISTINCT ClientID FROM deleted
+    );
+
+    INSERT INTO ClientPaymentsTotal (ClientID, TotalAmountPaid)
+    SELECT ClientID, SUM(Amount)
+    FROM Payments
+    GROUP BY ClientID;
+END;
+GO
+
+CREATE TRIGGER AutoSetPaymentDue
+ON Clients
+AFTER INSERT
+AS
+BEGIN
+    INSERT INTO ClientPaymentDue (ClientID, NextPaymentDue)
+    SELECT ClientID, DATEADD(DAY, 30, GETDATE())
+    FROM inserted;
+END;
+GO
